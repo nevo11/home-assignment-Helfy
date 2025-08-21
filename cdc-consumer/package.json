@@ -1,0 +1,14 @@
+{
+  "name": "cdc-consumer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "log4js": "^6.9.1"
+  }
+} 

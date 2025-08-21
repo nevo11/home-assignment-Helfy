@@ -1,0 +1,23 @@
+CREATE DATABASE IF NOT EXISTS appdb;
+USE appdb;
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(255) UNIQUE NOT NULL,
+  email VARCHAR(255) UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tokens (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  token VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_token(token)
+);
+
+INSERT INTO users (username, email, password_hash)
+SELECT 'admin', 'admin@example.com', '$2a$10$FfQVEHuZdQywG4ZBjNO.Tu31YqKBtR5Nngbp3DLNQb1ZWyl8XlKQC'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin');

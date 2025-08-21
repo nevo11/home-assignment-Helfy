@@ -1,0 +1,163 @@
+services:
+  backend:
+    build:
+      context: docker-nodejs-sample
+      dockerfile: Dockerfile
+    container_name: node-backend
+    environment:
+      - TIDB_HOST=tidb
+      - TIDB_PORT=4000
+      - TIDB_USER=root
+      - TIDB_PASSWORD=
+      - TIDB_DATABASE=appdb
+    depends_on:
+      - db-init
+      - tidb
+    ports:
+      - "3000:3000"
+    networks:
+      - home-assistant
+    restart: on-failure
+  frontend:
+    build:
+      context: docker-reactjs-sample
+      dockerfile: Dockerfile
+    container_name: react-frontend
+    ports:
+      - "8080:8080"
+    networks:
+      - home-assistant
+  kafka:
+    image: confluentinc/cp-kafka
+    container_name: kafka-kraft
+    environment:
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    networks:
+      - home-assistant
+    volumes:
+      - kafka_kraft_data:/var/lib/kafka/data
+  pd:
+    image: pingcap/pd:v7.5.0
+    container_name: pd
+    command:
+      - --name=pd
+      - --data-dir=/data/pd
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://pd:2379
+      - --advertise-peer-urls=http://pd:2380
+      - --initial-cluster=pd=http://pd:2380
+    ports:
+      - "2379:2379"
+    networks:
+      - home-assistant
+    volumes:
+      - pd_data:/data
+
+  tikv:
+    image: pingcap/tikv:v7.5.0
+    container_name: tikv
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv:20160
+      - --data-dir=/data/tikv
+      - --pd=pd:2379
+    depends_on:
+      - pd
+    volumes:
+      - tikv_data:/data
+    networks:
+      - home-assistant
+
+  tidb:
+    image: pingcap/tidb:v7.5.0
+    container_name: tidb
+    command:
+      - --store=tikv
+      - --path=pd:2379
+      - --log-file=/dev/stdout
+    ports:
+      - "4000:4000"   # MySQL client
+      - "10080:10080" # Status/metrics
+    depends_on:
+      - pd
+      - tikv
+    networks:
+      - home-assistant
+
+  ticdc:
+    image: pingcap/ticdc:v7.5.0
+    container_name: ticdc
+    command: "/cdc server --pd=http://pd:2379 --addr=ticdc:8300 --log-file=/dev/stdout"
+    depends_on:
+      - pd
+      - tidb
+    ports:
+      - "8300:8300"
+    networks:
+      - home-assistant
+
+  ticdc-init:
+    image: pingcap/ticdc:v7.5.0
+    container_name: ticdc-init
+    depends_on:
+      - ticdc
+      - kafka
+    networks:
+      - home-assistant
+    command: ["/bin/sh", "-c", "set -e; echo 'Waiting for TiCDC to be ready...'; until /cdc cli capture list --pd=http://pd:2379 >/dev/null 2>&1; do sleep 2; done; echo 'TiCDC ready'; /cdc cli changefeed create --pd=http://pd:2379 --sink-uri='kafka://kafka:29092/tidb-cdc?protocol=canal-json&replication-factor=1&partition-num=1' --changefeed-id=cf-home-assist || /cdc cli changefeed update --pd=http://pd:2379 --changefeed-id=cf-home-assist --sink-uri='kafka://kafka:29092/tidb-cdc?protocol=canal-json' "]
+
+  db-init:
+    image: mysql:8
+    container_name: db-init
+    depends_on:
+      - tidb
+      - kafka
+      - ticdc
+    networks:
+      - home-assistant
+    volumes:
+      - ./db:/init:ro
+    entrypoint: ["/bin/sh", "-c", "until mysqladmin ping -h tidb -P 4000 --silent; do sleep 2; done && mysql -h tidb -P 4000 -u root < /init/init.sql"]
+
+  cdc-consumer:
+    build:
+      context: cdc-consumer
+      dockerfile: Dockerfile
+    container_name: cdc-consumer
+    environment:
+      - KAFKA_BROKERS=kafka:29092
+      - KAFKA_TOPIC=tidb-cdc
+      - KAFKA_GROUP=cdc-consumer-group
+    depends_on:
+      - kafka
+      - ticdc-init
+    networks:
+      - home-assistant
+    restart: on-failure
+
+
+volumes:
+  kafka_kraft_data:
+  pd_data:
+  tikv_data:
+
+networks:
+  home-assistant:
+    driver: bridge
+
