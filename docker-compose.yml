@@ -27,6 +27,7 @@ services:
       - "8080:8080"
     networks:
       - home-assistant
+    restart: on-failure
   kafka:
     image: confluentinc/cp-kafka
     container_name: kafka-kraft
@@ -51,6 +52,7 @@ services:
       - home-assistant
     volumes:
       - kafka_kraft_data:/var/lib/kafka/data
+    restart: on-failure
   pd:
     image: pingcap/pd:v7.5.0
     container_name: pd
@@ -68,6 +70,7 @@ services:
       - home-assistant
     volumes:
       - pd_data:/data
+    restart: on-failure
 
   tikv:
     image: pingcap/tikv:v7.5.0
@@ -83,6 +86,7 @@ services:
       - tikv_data:/data
     networks:
       - home-assistant
+    restart: on-failure
 
   tidb:
     image: pingcap/tidb:v7.5.0
@@ -99,6 +103,7 @@ services:
       - tikv
     networks:
       - home-assistant
+    restart: on-failure
 
   ticdc:
     image: pingcap/ticdc:v7.5.0
@@ -111,6 +116,7 @@ services:
       - "8300:8300"
     networks:
       - home-assistant
+    restart: on-failure
 
   ticdc-init:
     image: pingcap/ticdc:v7.5.0
@@ -121,6 +127,7 @@ services:
     networks:
       - home-assistant
     command: ["/bin/sh", "-c", "set -e; echo 'Waiting for TiCDC to be ready...'; until /cdc cli capture list --pd=http://pd:2379 >/dev/null 2>&1; do sleep 2; done; echo 'TiCDC ready'; /cdc cli changefeed create --pd=http://pd:2379 --sink-uri='kafka://kafka:29092/tidb-cdc?protocol=canal-json&replication-factor=1&partition-num=1' --changefeed-id=cf-home-assist || /cdc cli changefeed update --pd=http://pd:2379 --changefeed-id=cf-home-assist --sink-uri='kafka://kafka:29092/tidb-cdc?protocol=canal-json' "]
+    restart: on-failure
 
   db-init:
     image: mysql:8
@@ -134,6 +141,7 @@ services:
     volumes:
       - ./db:/init:ro
     entrypoint: ["/bin/sh", "-c", "until mysqladmin ping -h tidb -P 4000 --silent; do sleep 2; done && mysql -h tidb -P 4000 -u root < /init/init.sql"]
+    restart: on-failure
 
   cdc-consumer:
     build:
